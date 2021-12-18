@@ -56,7 +56,7 @@ def _validate_array_out(array_out, array, shape_out):
 
 
 def _reproject_full(array, wcs_in, wcs_out, shape_out, order=1, array_out=None,
-                    return_footprint=True):
+                    return_footprint=True,threads=4):
     """
     Reproject n-dimensional data to a new projection using interpolation.
 
@@ -79,7 +79,7 @@ def _reproject_full(array, wcs_in, wcs_out, shape_out, order=1, array_out=None,
     pixel_out = np.meshgrid(*[np.arange(size, dtype=float) for size in shape_out],
                             indexing='ij', sparse=False, copy=False)
     pixel_out = [p.ravel() for p in pixel_out]
-    pixel_in = efficient_pixel_to_pixel_with_roundtrip(wcs_out, wcs_in, *pixel_out[::-1])[::-1]
+    pixel_in = efficient_pixel_to_pixel_with_roundtrip(wcs_out, wcs_in, *pixel_out[::-1],threads=threads)[::-1]
     pixel_in = np.array(pixel_in)
 
     if array_out is not None:

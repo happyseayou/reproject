@@ -8,6 +8,13 @@ import numpy as np
 from astropy.coordinates import SkyCoord
 from astropy.wcs import WCS
 from numpy.lib.stride_tricks import as_strided
+try:
+    from threadedp2p import pixel_to_pixel2
+    importp2p = True
+except:
+    importp2p = False
+    print("single")
+    pass
 
 __all__ = ['efficient_pixel_to_pixel', 'has_celestial']
 
@@ -156,7 +163,7 @@ def split_matrix(matrix):
     return split_info
 
 
-def efficient_pixel_to_pixel(wcs1, wcs2, *inputs):
+def efficient_pixel_to_pixel(wcs1, wcs2, *inputs,threads=4):
     """
     Wrapper that performs a pixel -> world -> pixel transformation with two
     WCS instances, and un-broadcasting arrays whenever possible for efficiency.
@@ -179,23 +186,51 @@ def efficient_pixel_to_pixel(wcs1, wcs2, *inputs):
 
     for (pixel_in_indices, pixel_out_indices) in split_info:
 
-        pixel_inputs = []
-        for ipix in range(wcs1.pixel_n_dim):
-            if ipix in pixel_in_indices:
-                pixel_inputs.append(unbroadcast(inputs[ipix]))
-            else:
-                pixel_inputs.append(inputs[ipix].flat[0])
+        if importp2p and threads > 1:
+            pixel_inputs = []
+            pixel_outputs = []
+            for ipix in range(wcs1.pixel_n_dim):
+                if ipix in pixel_in_indices:
+                    pixel_inputs.append(unbroadcast(inputs[ipix]))
+                    pixel_outputs.append(np.empty_like(pixel_inputs[-1]))
+                else:
+                    pixel_inputs.append(inputs[ipix].flat[0])
+                    pixel_outputs.append(np.empty_like(pixel_inputs[-1]))
 
-        pixel_inputs = np.broadcast_arrays(*pixel_inputs)
+            pixel_inputs = np.broadcast_arrays(*pixel_inputs)
+            length = len(pixel_inputs[0])
+            
+            pixel_to_pixel2(
+                    wcs1,
+                    wcs2,
+                    pixel_inputs,
+                    pixel_outputs,
+                    length,
+                    threads
+                )
 
-        world_outputs = wcs1.pixel_to_world(*pixel_inputs)
-        if not isinstance(world_outputs, (tuple, list)):
-            world_outputs = (world_outputs,)
-        pixel_outputs = wcs2.world_to_pixel(*world_outputs)
+            for ipix in range(wcs2.pixel_n_dim):
+                if ipix in pixel_out_indices:
+                    outputs[ipix] = np.broadcast_to(pixel_outputs[ipix], original_shape)
 
-        for ipix in range(wcs2.pixel_n_dim):
-            if ipix in pixel_out_indices:
-                outputs[ipix] = np.broadcast_to(pixel_outputs[ipix], original_shape)
+        else:
+            pixel_inputs = []
+            for ipix in range(wcs1.pixel_n_dim):
+                if ipix in pixel_in_indices:
+                    pixel_inputs.append(unbroadcast(inputs[ipix]))
+                else:
+                    pixel_inputs.append(inputs[ipix].flat[0])
+
+            pixel_inputs = np.broadcast_arrays(*pixel_inputs)
+
+            world_outputs = wcs1.pixel_to_world(*pixel_inputs)
+            if not isinstance(world_outputs, (tuple, list)):
+                world_outputs = (world_outputs,)
+            pixel_outputs = wcs2.world_to_pixel(*world_outputs)
+
+            for ipix in range(wcs2.pixel_n_dim):
+                if ipix in pixel_out_indices:
+                    outputs[ipix] = np.broadcast_to(pixel_outputs[ipix], original_shape)
 
     return outputs
 
@@ -213,12 +248,12 @@ def has_celestial(wcs):
         return False
 
 
-def efficient_pixel_to_pixel_with_roundtrip(wcs1, wcs2, *inputs):
+def efficient_pixel_to_pixel_with_roundtrip(wcs1, wcs2, *inputs,threads=4):
 
-    outputs = efficient_pixel_to_pixel(wcs1, wcs2, *inputs)
+    outputs = efficient_pixel_to_pixel(wcs1, wcs2, *inputs,threads=threads)
 
     # Now convert back to check that coordinates round-trip, if not then set to NaN
-    inputs_check = efficient_pixel_to_pixel(wcs2, wcs1, *outputs)
+    inputs_check = efficient_pixel_to_pixel(wcs2, wcs1, *outputs,threads=threads)
     reset = np.zeros(inputs_check[0].shape, dtype=bool)
     for ipix in range(len(inputs_check)):
         reset |= (np.abs(inputs_check[ipix] - inputs[ipix]) > 1)
