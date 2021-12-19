@@ -8,13 +8,8 @@ import numpy as np
 from astropy.coordinates import SkyCoord
 from astropy.wcs import WCS
 from numpy.lib.stride_tricks import as_strided
-try:
-    from threadedp2p import pixel_to_pixel2
-    importp2p = True
-except:
-    importp2p = False
-    print("single")
-    pass
+import math
+import threading
 
 __all__ = ['efficient_pixel_to_pixel', 'has_celestial']
 
@@ -163,6 +158,50 @@ def split_matrix(matrix):
     return split_info
 
 
+def pixel_to_pixel_single(wcs1,wcs2,pixin,pubout,st,ed):
+    
+    wcs1 = wcs1.deepcopy() #一定要复制，不然线程不安全
+    wcs2 = wcs2.deepcopy()
+    #pixin = copy.deepcopy(pixin)
+    piexl_inputs = []
+    for i in range(len(pixin)):
+        piexl_inputs.append(pixin[i][st:ed])
+    world_outputs = wcs1.pixel_to_world(*piexl_inputs)
+    # if not isinstance(world_outputs, (tuple, list)):
+    world_outputs = (world_outputs,)
+    #print(world_outputs)
+    pixel_outputs = wcs2.world_to_pixel(*world_outputs)
+    #print(pixel_outputs)
+    for i in range(len(pubout)):
+        pubout[i][st:ed] = pixel_outputs[i]
+
+
+def threadp2p(wcs1,wcs2,pixel_inputs,threads=4):
+    pixel_outputs = []
+    for i in range(len(pixel_inputs)):
+        pixel_outputs.append(np.empty_like(pixel_inputs[i]))
+
+    threads = []
+    worker_length = len(pixel_inputs[0]) 
+    nwork_per_worker = math.ceil(worker_length/threads)
+
+    for idx in range(0,worker_length,nwork_per_worker):
+        threads.append(
+            threading.Thread(target=pixel_to_pixel_single,
+                    args=(
+                        wcs1,
+                        wcs2,
+                        pixel_inputs,
+                        pixel_outputs,
+                        idx,
+                        idx+nwork_per_worker,
+                    )
+            )
+        )
+
+    return pixel_outputs
+
+
 def efficient_pixel_to_pixel(wcs1, wcs2, *inputs,threads=4):
     """
     Wrapper that performs a pixel -> world -> pixel transformation with two
@@ -185,52 +224,26 @@ def efficient_pixel_to_pixel(wcs1, wcs2, *inputs,threads=4):
     outputs = [None] * wcs2.pixel_n_dim
 
     for (pixel_in_indices, pixel_out_indices) in split_info:
+        pixel_inputs = []
+        for ipix in range(wcs1.pixel_n_dim):
+            if ipix in pixel_in_indices:
+                pixel_inputs.append(unbroadcast(inputs[ipix]))
+            else:
+                pixel_inputs.append(inputs[ipix].flat[0])
 
-        if importp2p and threads > 1:
-            pixel_inputs = []
-            pixel_outputs = []
-            for ipix in range(wcs1.pixel_n_dim):
-                if ipix in pixel_in_indices:
-                    pixel_inputs.append(unbroadcast(inputs[ipix]))
-                    pixel_outputs.append(np.empty_like(pixel_inputs[-1]))
-                else:
-                    pixel_inputs.append(inputs[ipix].flat[0])
-                    pixel_outputs.append(np.empty_like(pixel_inputs[-1]))
+        pixel_inputs = np.broadcast_arrays(*pixel_inputs)
 
-            pixel_inputs = np.broadcast_arrays(*pixel_inputs)
-            length = len(pixel_inputs[0])
-            
-            pixel_to_pixel2(
-                    wcs1,
-                    wcs2,
-                    pixel_inputs,
-                    pixel_outputs,
-                    length,
-                    threads
-                )
-
-            for ipix in range(wcs2.pixel_n_dim):
-                if ipix in pixel_out_indices:
-                    outputs[ipix] = np.broadcast_to(pixel_outputs[ipix], original_shape)
-
+        if threads > 1:
+            pixel_outputs = threadp2p(wcs1,wcs2,pixel_inputs,threads=threads)
         else:
-            pixel_inputs = []
-            for ipix in range(wcs1.pixel_n_dim):
-                if ipix in pixel_in_indices:
-                    pixel_inputs.append(unbroadcast(inputs[ipix]))
-                else:
-                    pixel_inputs.append(inputs[ipix].flat[0])
-
-            pixel_inputs = np.broadcast_arrays(*pixel_inputs)
-
             world_outputs = wcs1.pixel_to_world(*pixel_inputs)
             if not isinstance(world_outputs, (tuple, list)):
                 world_outputs = (world_outputs,)
             pixel_outputs = wcs2.world_to_pixel(*world_outputs)
 
-            for ipix in range(wcs2.pixel_n_dim):
-                if ipix in pixel_out_indices:
-                    outputs[ipix] = np.broadcast_to(pixel_outputs[ipix], original_shape)
+        for ipix in range(wcs2.pixel_n_dim):
+            if ipix in pixel_out_indices:
+                outputs[ipix] = np.broadcast_to(pixel_outputs[ipix], original_shape)
 
     return outputs
 
