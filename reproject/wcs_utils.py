@@ -176,14 +176,14 @@ def pixel_to_pixel_single(wcs1,wcs2,pixin,pubout,st,ed):
         pubout[i][st:ed] = pixel_outputs[i]
 
 
-def threadp2p(wcs1,wcs2,pixel_inputs,threads=4):
+def threadp2p(wcs1,wcs2,pixel_inputs,nthreads=4):
     pixel_outputs = []
     for i in range(len(pixel_inputs)):
         pixel_outputs.append(np.empty_like(pixel_inputs[i]))
 
     threads = []
     worker_length = len(pixel_inputs[0]) 
-    nwork_per_worker = math.ceil(worker_length/threads)
+    nwork_per_worker = math.ceil(worker_length/nthreads)
 
     for idx in range(0,worker_length,nwork_per_worker):
         threads.append(
@@ -198,6 +198,10 @@ def threadp2p(wcs1,wcs2,pixel_inputs,threads=4):
                     )
             )
         )
+    for th in threads:
+        th.start()
+    for th in threads:
+        th.join()
 
     return pixel_outputs
 
@@ -234,7 +238,7 @@ def efficient_pixel_to_pixel(wcs1, wcs2, *inputs,threads=4):
         pixel_inputs = np.broadcast_arrays(*pixel_inputs)
 
         if threads > 1:
-            pixel_outputs = threadp2p(wcs1,wcs2,pixel_inputs,threads=threads)
+            pixel_outputs = threadp2p(wcs1,wcs2,pixel_inputs,nthreads=threads)
         else:
             world_outputs = wcs1.pixel_to_world(*pixel_inputs)
             if not isinstance(world_outputs, (tuple, list)):
