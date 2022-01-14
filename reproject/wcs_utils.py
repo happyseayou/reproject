@@ -181,27 +181,79 @@ def threadp2p(wcs1,wcs2,pixel_inputs,nthreads=4):
     for i in range(len(pixel_inputs)):
         pixel_outputs.append(np.empty_like(pixel_inputs[i]))
 
-    threads = []
+    
     worker_length = len(pixel_inputs[0]) 
-    nwork_per_worker = math.ceil(worker_length/nthreads)
-
-    for idx in range(0,worker_length,nwork_per_worker):
-        threads.append(
-            threading.Thread(target=pixel_to_pixel_single,
-                    args=(
-                        wcs1,
-                        wcs2,
-                        pixel_inputs,
-                        pixel_outputs,
-                        idx,
-                        idx+nwork_per_worker,
-                    )
+    nwork_per_worker = int(np.ceil(worker_length/nthreads))
+    # print(worker_length)
+    # print(nwork_per_worker)
+    if nwork_per_worker < 2147483647:
+        #print("no too big data")
+        threads = []
+        n_threads = nthreads
+        for i in range(n_threads):
+            st = i*nwork_per_worker
+            ed = st+nwork_per_worker
+            threads.append(
+                threading.Thread(target=pixel_to_pixel_single,
+                        args=(
+                            wcs1,
+                            wcs2,
+                            pixel_inputs,
+                            pixel_outputs,
+                            st,
+                            ed,
+                        )
+                )
             )
-        )
-    for th in threads:
-        th.start()
-    for th in threads:
-        th.join()
+        # for idx in range(0,worker_length,nwork_per_worker):
+        #     threads.append(
+        #         threading.Thread(target=pixel_to_pixel_single,
+        #                 args=(
+        #                     wcs1,
+        #                     wcs2,
+        #                     pixel_inputs,
+        #                     pixel_outputs,
+        #                     idx,
+        #                     idx+nwork_per_worker,
+        #                 )
+        #         )
+        #     )
+        for th in threads:
+            th.start()
+        for th in threads:
+            th.join()
+    else:
+        # print("large data !!!")
+        all_threads = []
+        nwork_per_worker = 2147483647//2
+        n_all_threads = int(np.ceil(worker_length/nwork_per_worker))
+        for i in range(n_all_threads):
+            st = i*nwork_per_worker
+            ed = st+nwork_per_worker
+            all_threads.append(
+                threading.Thread(target=pixel_to_pixel_single,
+                        args=(
+                            wcs1,
+                            wcs2,
+                            pixel_inputs,
+                            pixel_outputs,
+                            st,
+                            ed,
+                        )
+                )
+            )
+        
+        # step with ntheads
+        sumntheads = 0
+        for i in range(0,n_all_threads,nthreads):
+            tmp_threads = all_threads[i,i+nthreads]
+            sumntheads += len(tmp_threads)
+            for th in tmp_threads:
+                th.start()
+            for th in tmp_threads:
+                th.join()
+        assert sumntheads==len(all_threads),"diffiance threads num"
+
 
     return pixel_outputs
 
