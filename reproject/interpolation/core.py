@@ -84,14 +84,17 @@ def _reproject_full(array, wcs_in, wcs_out, shape_out, order=1, array_out=None,
 
     if array_out is not None:
         array_out.shape = (array_out.size,)
-    else:
-        array_out = np.empty(shape_out).ravel()
+    # else:
+    #     array_out = np.empty(shape_out).ravel()
 
-    map_coordinates(array, pixel_in, order=order, cval=np.nan,
-                    mode='constant', output=array_out,).reshape(shape_out)
 
+    array_out = map_coordinates(array, pixel_in, shape_out,threads=threads,order=order, cval=np.nan,
+                    mode='constant')
+
+
+    print(array_out.shape)
     array_out.shape = shape_out
-
+    print(array_out.shape)
     if return_footprint:
         return array_out, (~np.isnan(array_out)).astype(float)
     else:
